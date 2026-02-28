@@ -1,0 +1,29 @@
+{
+  "name": "sunspotted",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Real-time sun and shadow visualization for urban areas",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "type-check": "turbo type-check",
+    "clean": "turbo clean"
+  },
+  "keywords": [
+    "sun",
+    "shadow",
+    "maps",
+    "geospatial",
+    "urban"
+  ],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.30.3",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  },
+  "devDependencies": {
+    "turbo": "^2.8.12"
+  }
+}
