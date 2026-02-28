@@ -163,9 +163,9 @@ export function calculateFullShadows(
 }
 
 /**
- * Calculate simple projected shadow polygons for map rendering.
- * No turf.union/difference — just the offset footprint polygon.
- * This is fast and reliable for visualization.
+ * Calculate shadow polygons for map rendering.
+ * Uses convex hull for clean shapes, then subtracts building footprint
+ * so shadows only appear on the ground (streets, sidewalks, etc.).
  */
 export function calculateSimpleShadows(
   buildings: Array<{ id: string; footprint: Polygon; height: number }>,
@@ -186,23 +186,52 @@ export function calculateSimpleShadows(
     const dyDeg = metersToDegreesLat(shadowLength * cosAngle);
 
     const coords = building.footprint.coordinates[0];
-
-    // Create a trapezoid for each edge: connect footprint vertex to its shadow projection
-    // This creates a more accurate shadow shape than just the offset polygon
     const shadowCoords = coords.map((c) => [c[0] + dxDeg, c[1] + dyDeg]);
 
-    // Build the shadow polygon: footprint + projected footprint connected
-    // Walk forward along footprint, then backward along shadow projection
-    const combinedCoords = [
-      ...coords.slice(0, -1),           // footprint vertices (exclude closing duplicate)
-      ...shadowCoords.slice(0, -1).reverse(), // shadow vertices reversed
-      coords[0],                          // close the polygon
-    ];
+    try {
+      // Step 1: Convex hull of footprint + shadow = clean shadow envelope
+      const allPoints = turf.featureCollection([
+        ...coords.map((c) => turf.point(c)),
+        ...shadowCoords.map((c) => turf.point(c)),
+      ]);
+      const hull = turf.convex(allPoints);
+      if (!hull) continue;
 
-    shadows.push({
-      buildingId: building.id,
-      geometry: { type: "Polygon", coordinates: [combinedCoords] },
-    });
+      // Step 2: Subtract building footprint → shadow only on ground
+      try {
+        const footprintPoly = turf.polygon([coords]);
+        const groundShadow = turf.difference(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          turf.featureCollection([hull, footprintPoly]) as any,
+        );
+        if (groundShadow) {
+          shadows.push({
+            buildingId: building.id,
+            geometry: groundShadow.geometry as Polygon,
+          });
+          continue;
+        }
+      } catch {
+        // difference failed — fall through to hull
+      }
+
+      // Fallback: use hull as-is (includes building area)
+      shadows.push({
+        buildingId: building.id,
+        geometry: hull.geometry as Polygon,
+      });
+    } catch {
+      // Last resort: just the offset polygon
+      try {
+        const offsetPoly = turf.polygon([shadowCoords]);
+        shadows.push({
+          buildingId: building.id,
+          geometry: offsetPoly.geometry,
+        });
+      } catch {
+        // Skip invalid geometry
+      }
+    }
   }
 
   return shadows;
