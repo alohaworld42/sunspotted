@@ -7,7 +7,10 @@ import { useAnalysisStore } from "../../store/analysisStore";
 import { useTimeStore } from "../../store/timeStore";
 import { usePointAnalysis } from "../../hooks/usePointAnalysis";
 import { getSunPosition } from "../../lib/sun/position";
+import * as turf from "@turf/turf";
 import { calculateSimpleShadows } from "../../lib/shadow/projection";
+import { effectiveCanopyRadius } from "../../lib/trees/loader";
+import type { ShadowPolygon } from "../../types/shadow";
 import type { POI, POICategory } from "../../types/poi";
 
 // OpenFreeMap: free, no API key, includes OpenMapTiles vector data with buildings
@@ -18,9 +21,25 @@ const SATELLITE_TILES = "https://services.arcgisonline.com/arcgis/rest/services/
 
 const SHADOW_SOURCE = "analysis-shadows";
 const SHADOW_LAYER = "analysis-shadow-layer";
+const TREE_SHADOW_SOURCE = "tree-shadows";
+const TREE_SHADOW_LAYER = "tree-shadow-layer";
 const SATELLITE_SOURCE = "satellite-imagery";
 const SATELLITE_LAYER = "satellite-layer";
 const BUILDINGS_3D_LAYER = "3d-buildings";
+
+const METERS_PER_DEGREE_LAT = 111_320;
+
+function buildCanopyPoly(center: [number, number], radiusMeters: number, lat: number): Polygon {
+  const segments = 12;
+  const coords: [number, number][] = [];
+  for (let i = 0; i <= segments; i++) {
+    const angle = (2 * Math.PI * i) / segments;
+    const dx = radiusMeters * Math.cos(angle) / (METERS_PER_DEGREE_LAT * Math.cos((lat * Math.PI) / 180));
+    const dy = radiusMeters * Math.sin(angle) / METERS_PER_DEGREE_LAT;
+    coords.push([center[0] + dx, center[1] + dy]);
+  }
+  return { type: "Polygon", coordinates: [coords] };
+}
 
 const CATEGORY_ICONS: Record<POICategory, string> = {
   cafe: "\u2615",
@@ -51,8 +70,12 @@ export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: Ma
   const { analyzePoint } = usePointAnalysis();
   const selectedPoint = useAnalysisStore((s) => s.selectedPoint);
   const analysisShadows = useAnalysisStore((s) => s.analysisShadows);
+  const treeShadows = useAnalysisStore((s) => s.treeShadows);
   const analysisBuildings = useAnalysisStore((s) => s.analysisBuildings);
+  const analysisTrees = useAnalysisStore((s) => s.analysisTrees);
+  const showTreeShadows = useAnalysisStore((s) => s.showTreeShadows);
   const setAnalysisShadows = useAnalysisStore((s) => s.setAnalysisShadows);
+  const setTreeShadowsStore = useAnalysisStore((s) => s.setTreeShadows);
   const isAnalyzing = useAnalysisStore((s) => s.isAnalyzing);
   const currentTime = useTimeStore((s) => s.currentTime);
   const markerRef = useRef<maplibregl.Marker | null>(null);
@@ -133,6 +156,27 @@ export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: Ma
           paint: {
             "fill-color": "#cc0000",
             "fill-opacity": 0.4,
+            "fill-antialias": true,
+          },
+        },
+        labelLayerId,
+      );
+
+      // Tree shadow source + layer — greenish, lower opacity for dappled light
+      map.addSource(TREE_SHADOW_SOURCE, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      map.addLayer(
+        {
+          id: TREE_SHADOW_LAYER,
+          type: "fill",
+          source: TREE_SHADOW_SOURCE,
+          layout: { visibility: "visible" },
+          paint: {
+            "fill-color": "#2d4a2d",
+            "fill-opacity": 0.2,
             "fill-antialias": true,
           },
         },
@@ -252,10 +296,41 @@ export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: Ma
         const buildingInputs = analysisBuildings.map((b) => ({
           id: b.id, footprint: b.footprint, height: b.height,
         }));
+
         const shadows = calculateSimpleShadows(buildingInputs, sun.azimuth, sun.altitude, lat);
         setAnalysisShadows(shadows);
+
+        // Tree shadows (convex hull approach — robust for small canopy polygons)
+        if (analysisTrees.length > 0 && showTreeShadows) {
+          const sinAngle = Math.sin(sun.azimuth);
+          const cosAngle = Math.cos(sun.azimuth);
+          const tShadows: ShadowPolygon[] = [];
+          for (const tree of analysisTrees) {
+            const radius = effectiveCanopyRadius(tree, currentTime);
+            const canopy = buildCanopyPoly(tree.location, radius, lat);
+            const coords = canopy.coordinates[0];
+            const shadowLength = tree.height / Math.tan(sun.altitude);
+            const dxDeg = shadowLength * sinAngle / (METERS_PER_DEGREE_LAT * Math.cos((lat * Math.PI) / 180));
+            const dyDeg = shadowLength * cosAngle / METERS_PER_DEGREE_LAT;
+            const shadowCoords = coords.map((c) => [c[0] + dxDeg, c[1] + dyDeg]);
+            try {
+              const allPoints = turf.featureCollection([
+                ...coords.map((c) => turf.point(c)),
+                ...shadowCoords.map((c) => turf.point(c)),
+              ]);
+              const hull = turf.convex(allPoints);
+              if (hull) {
+                tShadows.push({ buildingId: tree.id, geometry: hull.geometry as Polygon, sourceType: "tree" });
+              }
+            } catch { /* skip invalid */ }
+          }
+          setTreeShadowsStore(tShadows);
+        } else {
+          setTreeShadowsStore([]);
+        }
       } else {
         setAnalysisShadows([]);
+        setTreeShadowsStore([]);
       }
     };
 
@@ -269,7 +344,7 @@ export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: Ma
     return () => {
       if (shadowThrottleRef.current) clearTimeout(shadowThrottleRef.current);
     };
-  }, [currentTime, selectedPoint, analysisBuildings, setAnalysisShadows]);
+  }, [currentTime, selectedPoint, analysisBuildings, analysisTrees, showTreeShadows, setAnalysisShadows, setTreeShadowsStore]);
 
   // Sync satellite layer visibility with prop
   useEffect(() => {
@@ -302,6 +377,38 @@ export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: Ma
 
     source.setData(geojson);
   }, [analysisShadows, mapLoaded]);
+
+  // Update tree shadow layer on map
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const source = map.getSource(TREE_SHADOW_SOURCE) as maplibregl.GeoJSONSource;
+    if (!source) return;
+
+    if (!showTreeShadows || treeShadows.length === 0) {
+      source.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+
+    const geojson: FeatureCollection<Polygon | MultiPolygon> = {
+      type: "FeatureCollection",
+      features: treeShadows.map((s) => ({
+        type: "Feature" as const,
+        properties: { buildingId: s.buildingId },
+        geometry: s.geometry,
+      })),
+    };
+
+    source.setData(geojson);
+  }, [treeShadows, showTreeShadows, mapLoaded]);
+
+  // Sync tree shadow layer visibility
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    map.setLayoutProperty(TREE_SHADOW_LAYER, "visibility", showTreeShadows ? "visible" : "none");
+  }, [showTreeShadows, mapLoaded]);
 
   // Show/hide marker + fly to point
   const prevPointRef = useRef<[number, number] | null>(null);
