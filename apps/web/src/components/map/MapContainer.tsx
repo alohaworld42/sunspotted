@@ -186,7 +186,7 @@ export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: Ma
           id: TREE_SHADOW_LAYER,
           type: "fill",
           source: TREE_SHADOW_SOURCE,
-          layout: { visibility: "visible" },
+          layout: { visibility: "none" },
           paint: {
             "fill-color": "#2d4a2d",
             "fill-opacity": 0.2,

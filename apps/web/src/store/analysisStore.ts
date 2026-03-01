@@ -40,7 +40,7 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
   treeShadows: [],
   analysisBuildings: [],
   analysisTrees: [],
-  showTreeShadows: true,
+  showTreeShadows: false,
   selectedPOIName: null,
 
   setSelectedPoint: (point) => set({ selectedPoint: point }),

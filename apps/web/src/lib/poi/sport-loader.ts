@@ -1,96 +1,91 @@
 import type { POI, POICategory } from "../../types/poi";
 
-/** Vienna OGD WFS endpoint for sport facilities */
-const WFS_URL =
-  "https://data.wien.gv.at/daten/geo?service=WFS&request=GetFeature&version=1.1.0&typeName=ogdwien:SPORTSTAETTENOGD&srsName=EPSG:4326&outputFormat=json";
+const OVERPASS_API = "https://overpass-api.de/api/interpreter";
 
-interface SportMapping {
-  keyword: string;
+interface SportQuery {
+  sport: string;
   category: POICategory;
   label: string;
 }
 
-const SPORT_MAPPINGS: SportMapping[] = [
-  { keyword: "tischtennis", category: "table_tennis", label: "Tischtennis" },
-  { keyword: "beachvolleyball", category: "volleyball", label: "Beachvolleyball" },
-  { keyword: "volleyball", category: "volleyball", label: "Volleyball" },
-  { keyword: "basketball", category: "basketball", label: "Basketball" },
+const SPORT_QUERIES: SportQuery[] = [
+  { sport: "table_tennis", category: "table_tennis", label: "Tischtennis" },
+  { sport: "volleyball", category: "volleyball", label: "Volleyball" },
+  { sport: "beachvolleyball", category: "volleyball", label: "Beachvolleyball" },
+  { sport: "basketball", category: "basketball", label: "Basketball" },
 ];
 
-/** Outdoor category number in Vienna OGD data */
-const OUTDOOR_CATEGORY = 3;
-
-interface WFSFeature {
-  type: "Feature";
-  id: string;
-  geometry: { type: "Point"; coordinates: [number, number] };
-  properties: {
-    OBJECTID: number;
-    KATEGORIE_TXT: string;
-    KATEGORIE_NUM: number;
-    ADRESSE: string;
-    FLAECHE: number;
-    SPORTSTAETTEN_ART: string;
-    WEBLINK1: string | null;
-  };
+interface OverpassElement {
+  type: string;
+  id: number;
+  lat?: number;
+  lon?: number;
+  center?: { lat: number; lon: number };
+  tags?: Record<string, string>;
 }
 
-/** Cache all Vienna sport POIs after first fetch */
-let cachedPOIs: POI[] | null = null;
-
 /**
- * Fetch outdoor sport facilities from Vienna OGD WFS.
- * Data is cached after first request (~1500 entries, small payload).
- * Returns only POIs within the given bounding box.
+ * Fetch sport pitches/tables from Overpass API for exact locations.
+ * Queries leisure=pitch + sport=* and standalone sport=table_tennis nodes.
  */
 export async function fetchSportPOIs(
   bbox: [number, number, number, number],
 ): Promise<POI[]> {
-  if (!cachedPOIs) {
-    const response = await fetch(WFS_URL);
-    if (!response.ok) throw new Error(`Vienna WFS error: ${response.status}`);
-    const data = await response.json();
-    cachedPOIs = parseWFSFeatures(data.features || []);
+  const [west, south, east, north] = bbox;
+  const bboxStr = `${south},${west},${north},${east}`;
+
+  const sportFilters = SPORT_QUERIES.map(
+    (q) => `nwr["leisure"="pitch"]["sport"="${q.sport}"](${bboxStr});`,
+  ).join("\n");
+
+  const query = `
+    [out:json][timeout:25];
+    (
+      ${sportFilters}
+      node["sport"="table_tennis"](${bboxStr});
+    );
+    out center tags;
+  `;
+
+  const response = await fetch(OVERPASS_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `data=${encodeURIComponent(query)}`,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Overpass API error: ${response.status}`);
   }
 
-  const [west, south, east, north] = bbox;
-  return cachedPOIs.filter((poi) => {
-    const [lng, lat] = poi.location;
-    return lng >= west && lng <= east && lat >= south && lat <= north;
-  });
+  const data = await response.json();
+  return parseOverpassSports(data.elements || []);
 }
 
-function parseWFSFeatures(features: WFSFeature[]): POI[] {
+function parseOverpassSports(elements: OverpassElement[]): POI[] {
   const pois: POI[] = [];
 
-  for (const feature of features) {
-    const props = feature.properties;
-    if (!props || !feature.geometry?.coordinates) continue;
+  for (const el of elements) {
+    const lat = el.lat ?? el.center?.lat;
+    const lon = el.lon ?? el.center?.lon;
+    if (!lat || !lon || !el.tags) continue;
 
-    // Only outdoor facilities
-    if (props.KATEGORIE_NUM !== OUTDOOR_CATEGORY) continue;
+    const sport = el.tags.sport;
+    if (!sport) continue;
 
-    const sportArt = (props.SPORTSTAETTEN_ART || "").toLowerCase();
-    const [lng, lat] = feature.geometry.coordinates;
+    const match = SPORT_QUERIES.find((q) => q.sport === sport);
+    if (!match) continue;
 
-    // Create one POI per matched sport type (a facility can have multiple)
-    const seen = new Set<POICategory>();
-    for (const mapping of SPORT_MAPPINGS) {
-      if (sportArt.includes(mapping.keyword) && !seen.has(mapping.category)) {
-        seen.add(mapping.category);
-        pois.push({
-          id: `wien-sport-${props.OBJECTID}-${mapping.category}`,
-          name: `${mapping.label} — ${props.ADRESSE}`,
-          category: mapping.category,
-          location: [lng, lat],
-          hasOutdoor: true,
-          tags: {
-            sport_type: props.SPORTSTAETTEN_ART,
-            address: props.ADRESSE,
-          },
-        });
-      }
-    }
+    const name = el.tags.name || match.label;
+
+    pois.push({
+      id: `sport-${el.type}-${el.id}`,
+      osmId: el.id,
+      name,
+      category: match.category,
+      location: [lon, lat],
+      hasOutdoor: true,
+      tags: el.tags,
+    });
   }
 
   return pois;

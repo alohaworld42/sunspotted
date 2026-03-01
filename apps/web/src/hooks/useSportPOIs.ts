@@ -3,17 +3,21 @@ import type { POI } from "../types/poi";
 import { fetchSportPOIs } from "../lib/poi/sport-loader";
 import { useMapStore } from "../store/mapStore";
 
+const DEBOUNCE_MS = 800;
+const MIN_ZOOM = 13;
+
 /**
  * Hook that fetches outdoor sport facilities (table tennis, volleyball, basketball)
- * from the Vienna OGD WFS API. Data is cached after first load and filtered
- * by the current map bounds.
+ * from Overpass API. Debounced to avoid excessive requests while panning.
  */
 export function useSportPOIs() {
   const [pois, setPois] = useState<POI[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSports, setShowSports] = useState(false);
   const bounds = useMapStore((s) => s.bounds);
+  const zoom = useMapStore((s) => s.zoom);
   const lastBoundsKey = useRef<string | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchSports = useCallback(async (bbox: [number, number, number, number]) => {
     const key = bbox.map((v) => v.toFixed(3)).join(",");
@@ -31,12 +35,19 @@ export function useSportPOIs() {
     }
   }, []);
 
-  // Re-filter when map moves or toggle changes
+  // Debounced fetch when map moves
   useEffect(() => {
-    if (showSports && bounds) {
+    if (!showSports || !bounds || zoom < MIN_ZOOM) return;
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
       fetchSports(bounds);
-    }
-  }, [showSports, bounds, fetchSports]);
+    }, DEBOUNCE_MS);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [showSports, bounds, zoom, fetchSports]);
 
   const toggleSports = useCallback(() => {
     setShowSports((prev) => {
