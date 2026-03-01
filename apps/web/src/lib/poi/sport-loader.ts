@@ -71,24 +71,26 @@ function parseWFSFeatures(features: WFSFeature[]): POI[] {
     if (props.KATEGORIE_NUM !== OUTDOOR_CATEGORY) continue;
 
     const sportArt = (props.SPORTSTAETTEN_ART || "").toLowerCase();
-
-    // Find matching sport category
-    const match = SPORT_MAPPINGS.find((m) => sportArt.includes(m.keyword));
-    if (!match) continue;
-
     const [lng, lat] = feature.geometry.coordinates;
 
-    pois.push({
-      id: `wien-sport-${props.OBJECTID}`,
-      name: `${match.label} — ${props.ADRESSE}`,
-      category: match.category,
-      location: [lng, lat],
-      hasOutdoor: true,
-      tags: {
-        sport_type: props.SPORTSTAETTEN_ART,
-        address: props.ADRESSE,
-      },
-    });
+    // Create one POI per matched sport type (a facility can have multiple)
+    const seen = new Set<POICategory>();
+    for (const mapping of SPORT_MAPPINGS) {
+      if (sportArt.includes(mapping.keyword) && !seen.has(mapping.category)) {
+        seen.add(mapping.category);
+        pois.push({
+          id: `wien-sport-${props.OBJECTID}-${mapping.category}`,
+          name: `${mapping.label} — ${props.ADRESSE}`,
+          category: mapping.category,
+          location: [lng, lat],
+          hasOutdoor: true,
+          tags: {
+            sport_type: props.SPORTSTAETTEN_ART,
+            address: props.ADRESSE,
+          },
+        });
+      }
+    }
   }
 
   return pois;
