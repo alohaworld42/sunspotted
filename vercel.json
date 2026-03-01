@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm --filter web build && cp -r apps/web/dist .",
+  "buildCommand": "bash scripts/build-vercel.sh",
   "outputDirectory": "dist",
   "installCommand": "pnpm install",
   "framework": null,
