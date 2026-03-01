@@ -11,11 +11,14 @@ interface AnalysisState {
   analysisShadows: ShadowPolygon[];
   /** Buildings fetched around the selected point */
   analysisBuildings: Building[];
+  /** Name of the selected POI (if analysis was triggered by clicking a POI) */
+  selectedPOIName: string | null;
   setSelectedPoint: (point: [number, number] | null) => void;
   setAnalysisResult: (result: PointAnalysisResult | null) => void;
   setAnalyzing: (analyzing: boolean) => void;
   setAnalysisShadows: (shadows: ShadowPolygon[]) => void;
   setAnalysisBuildings: (buildings: Building[]) => void;
+  setSelectedPOIName: (name: string | null) => void;
   clearAnalysis: () => void;
 }
 
@@ -25,12 +28,14 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
   isAnalyzing: false,
   analysisShadows: [],
   analysisBuildings: [],
+  selectedPOIName: null,
 
   setSelectedPoint: (point) => set({ selectedPoint: point }),
   setAnalysisResult: (result) => set({ analysisResult: result }),
   setAnalyzing: (analyzing) => set({ isAnalyzing: analyzing }),
   setAnalysisShadows: (shadows) => set({ analysisShadows: shadows }),
   setAnalysisBuildings: (buildings) => set({ analysisBuildings: buildings }),
+  setSelectedPOIName: (name) => set({ selectedPOIName: name }),
   clearAnalysis: () =>
     set({
       selectedPoint: null,
@@ -38,5 +43,6 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
       isAnalyzing: false,
       analysisShadows: [],
       analysisBuildings: [],
+      selectedPOIName: null,
     }),
 }));

@@ -8,6 +8,7 @@ import { useTimeStore } from "../../store/timeStore";
 import { usePointAnalysis } from "../../hooks/usePointAnalysis";
 import { getSunPosition } from "../../lib/sun/position";
 import { calculateSimpleShadows } from "../../lib/shadow/projection";
+import type { POI, POICategory } from "../../types/poi";
 
 // OpenFreeMap: free, no API key, includes OpenMapTiles vector data with buildings
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
@@ -21,7 +22,19 @@ const SATELLITE_SOURCE = "satellite-imagery";
 const SATELLITE_LAYER = "satellite-layer";
 const BUILDINGS_3D_LAYER = "3d-buildings";
 
-export function MapContainer() {
+const CATEGORY_ICONS: Record<POICategory, string> = {
+  cafe: "\u2615",
+  restaurant: "\uD83C\uDF7D\uFE0F",
+  beer_garden: "\uD83C\uDF7A",
+  park: "\uD83C\uDF33",
+};
+
+interface MapContainerProps {
+  pois?: POI[];
+  onPoiSelect?: (poi: POI) => void;
+}
+
+export function MapContainer({ pois = [], onPoiSelect }: MapContainerProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -150,8 +163,9 @@ export function MapContainer() {
 
     map.on("moveend", () => updateMapState(map));
 
-    // Click = analyze that point
+    // Click = analyze that point (clear POI name since it's a direct map click)
     map.on("click", (e) => {
+      useAnalysisStore.getState().setSelectedPOIName(null);
       analyzePoint([e.lngLat.lng, e.lngLat.lat]);
     });
 
@@ -290,6 +304,48 @@ export function MapContainer() {
     }
   }, [selectedPoint, mapLoaded]);
 
+  // POI markers
+  const poiMarkersRef = useRef<maplibregl.Marker[]>([]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    // Clear old markers
+    for (const m of poiMarkersRef.current) m.remove();
+    poiMarkersRef.current = [];
+
+    for (const poi of pois) {
+      const el = document.createElement("div");
+      el.style.cssText = `
+        display:flex;align-items:center;justify-content:center;
+        width:32px;height:32px;border-radius:50%;cursor:pointer;
+        font-size:16px;background:rgba(255,255,255,0.92);
+        border:2px solid #f59e0b;
+        box-shadow:0 2px 6px rgba(0,0,0,0.25);
+        transition:transform 0.15s;
+      `;
+      el.textContent = CATEGORY_ICONS[poi.category];
+      el.title = poi.name;
+
+      el.addEventListener("mouseenter", () => { el.style.transform = "scale(1.25)"; });
+      el.addEventListener("mouseleave", () => { el.style.transform = "scale(1)"; });
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (onPoiSelect) onPoiSelect(poi);
+      });
+
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat(poi.location)
+        .addTo(map);
+      poiMarkersRef.current.push(marker);
+    }
+
+    return () => {
+      for (const m of poiMarkersRef.current) m.remove();
+      poiMarkersRef.current = [];
+    };
+  }, [pois, mapLoaded, onPoiSelect]);
+
   return (
     <div className="w-full h-full relative">
       <div ref={mapContainer} className="w-full h-full" />
@@ -298,7 +354,7 @@ export function MapContainer() {
       <button
         type="button"
         onClick={toggleSatellite}
-        className="absolute bottom-16 left-4 z-10 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2 cursor-pointer"
+        className="absolute bottom-40 left-4 z-10 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2 cursor-pointer"
         title={satelliteOn ? "Karte anzeigen" : "Satellit anzeigen"}
       >
         {satelliteOn ? (

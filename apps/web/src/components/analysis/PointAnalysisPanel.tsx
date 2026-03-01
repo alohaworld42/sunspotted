@@ -5,6 +5,7 @@ export function PointAnalysisPanel() {
   const analysisResult = useAnalysisStore((s) => s.analysisResult);
   const isAnalyzing = useAnalysisStore((s) => s.isAnalyzing);
   const clearAnalysis = useAnalysisStore((s) => s.clearAnalysis);
+  const selectedPOIName = useAnalysisStore((s) => s.selectedPOIName);
 
   if (!analysisResult && !isAnalyzing) return null;
 
@@ -23,10 +24,17 @@ export function PointAnalysisPanel() {
     <div className="absolute top-4 right-4 z-20 w-80 bg-white/95 backdrop-blur-sm rounded-xl shadow-xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-100">
-        <h2 className="font-semibold text-gray-800">Sonnen-Analyse</h2>
+        <div>
+          <h2 className="font-semibold text-gray-800">
+            {selectedPOIName || "Sonnen-Analyse"}
+          </h2>
+          {selectedPOIName && (
+            <p className="text-xs text-gray-500">Sonnen-Analyse</p>
+          )}
+        </div>
         <button
           onClick={clearAnalysis}
-          className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+          className="text-gray-400 hover:text-gray-600 text-lg leading-none cursor-pointer"
         >
           &times;
         </button>
