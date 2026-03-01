@@ -1,36 +1,39 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import type { POI, POICategory } from "../types/poi";
 import { fetchPOIsFromOverpass } from "../lib/poi/loader";
-import { useMapStore } from "../store/mapStore";
+import { useAnalysisStore } from "../store/analysisStore";
+
+/** Radius around selected point for POI search (~400m) */
+const POI_RADIUS_DEG = 0.004;
 
 /**
- * Hook that fetches POIs (cafés, restaurants, etc.) from Overpass API
- * for the current map viewport. Debounces requests and caches results.
+ * Hook that fetches cafés from Overpass API near the selected analysis point.
+ * Only fetches cafés (no restaurants/beer gardens). Off by default.
  */
 export function usePOIs() {
   const [pois, setPois] = useState<POI[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showPOIs, setShowPOIs] = useState(false);
-  const bounds = useMapStore((s) => s.bounds);
-  const lastFetchBounds = useRef<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const selectedPoint = useAnalysisStore((s) => s.selectedPoint);
+  const lastFetchKey = useRef<string | null>(null);
 
-  const fetchPOIs = useCallback(async () => {
-    if (!bounds) return;
+  const fetchPOIs = useCallback(async (point: [number, number]) => {
+    const [lng, lat] = point;
+    const key = `${lng.toFixed(4)},${lat.toFixed(4)}`;
+    if (key === lastFetchKey.current) return;
+    lastFetchKey.current = key;
 
-    // Simple dedup: don't refetch if bounds haven't changed much
-    const boundsKey = bounds.map((b) => b.toFixed(3)).join(",");
-    if (boundsKey === lastFetchBounds.current) return;
-    lastFetchBounds.current = boundsKey;
-
-    // Cancel previous request
-    if (abortRef.current) abortRef.current.abort();
-    abortRef.current = new AbortController();
+    const bbox: [number, number, number, number] = [
+      lng - POI_RADIUS_DEG,
+      lat - POI_RADIUS_DEG,
+      lng + POI_RADIUS_DEG,
+      lat + POI_RADIUS_DEG,
+    ];
 
     setIsLoading(true);
     try {
-      const categories: POICategory[] = ["cafe", "restaurant", "beer_garden"];
-      const results = await fetchPOIsFromOverpass(bounds, categories);
+      const categories: POICategory[] = ["cafe"];
+      const results = await fetchPOIsFromOverpass(bbox, categories);
       setPois(results);
     } catch (err) {
       if (err instanceof Error && err.name !== "AbortError") {
@@ -39,28 +42,32 @@ export function usePOIs() {
     } finally {
       setIsLoading(false);
     }
-  }, [bounds]);
+  }, []);
+
+  // Auto-fetch when a point is selected and POIs are enabled
+  useEffect(() => {
+    if (showPOIs && selectedPoint) {
+      fetchPOIs(selectedPoint);
+    }
+  }, [showPOIs, selectedPoint, fetchPOIs]);
 
   const togglePOIs = useCallback(() => {
     setShowPOIs((prev) => {
       const next = !prev;
-      if (next) {
-        // Fetch on enable
-        fetchPOIs();
-      } else {
+      if (!next) {
         setPois([]);
-        lastFetchBounds.current = null;
+        lastFetchKey.current = null;
       }
       return next;
     });
-  }, [fetchPOIs]);
+  }, []);
 
   const refetch = useCallback(() => {
-    if (showPOIs) {
-      lastFetchBounds.current = null; // force refetch
-      fetchPOIs();
+    if (showPOIs && selectedPoint) {
+      lastFetchKey.current = null;
+      fetchPOIs(selectedPoint);
     }
-  }, [showPOIs, fetchPOIs]);
+  }, [showPOIs, selectedPoint, fetchPOIs]);
 
   return { pois, isLoading, showPOIs, togglePOIs, refetch };
 }

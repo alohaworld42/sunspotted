@@ -32,13 +32,13 @@ const CATEGORY_ICONS: Record<POICategory, string> = {
 interface MapContainerProps {
   pois?: POI[];
   onPoiSelect?: (poi: POI) => void;
+  satelliteOn?: boolean;
 }
 
-export function MapContainer({ pois = [], onPoiSelect }: MapContainerProps) {
+export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: MapContainerProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [satelliteOn, setSatelliteOn] = useState(false);
 
   const center = useMapStore((s) => s.center);
   const zoom = useMapStore((s) => s.zoom);
@@ -159,6 +159,21 @@ export function MapContainer({ pois = [], onPoiSelect }: MapContainerProps) {
 
       updateMapState(map);
       setMapLoaded(true);
+
+      // Fly to user's geolocation if available
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            map.flyTo({
+              center: [pos.coords.longitude, pos.coords.latitude],
+              zoom: 15,
+              duration: 2000,
+            });
+          },
+          () => { /* denied or error — stay at default */ },
+          { enableHighAccuracy: true, timeout: 8000 },
+        );
+      }
     });
 
     map.on("moveend", () => updateMapState(map));
@@ -200,7 +215,9 @@ export function MapContainer({ pois = [], onPoiSelect }: MapContainerProps) {
       });
 
       map.setPaintProperty(BUILDINGS_3D_LAYER, "fill-extrusion-color",
-        satelliteOn ? "#b0b0b8" : "#e0e0e4");
+        satelliteOn ? "#c8c8d0" : "#e0e0e4");
+      map.setPaintProperty(BUILDINGS_3D_LAYER, "fill-extrusion-opacity",
+        satelliteOn ? 0.35 : 0.75);
     } else {
       // Night: dim flat lighting
       map.setLight({
@@ -210,37 +227,55 @@ export function MapContainer({ pois = [], onPoiSelect }: MapContainerProps) {
         color: "#c0c8d8",
       });
       map.setPaintProperty(BUILDINGS_3D_LAYER, "fill-extrusion-color",
-        satelliteOn ? "#808088" : "#b0b0b8");
+        satelliteOn ? "#909098" : "#b0b0b8");
+      map.setPaintProperty(BUILDINGS_3D_LAYER, "fill-extrusion-opacity",
+        satelliteOn ? 0.3 : 0.75);
     }
   }, [currentTime, center, mapLoaded, satelliteOn]);
 
-  // Re-compute shadows when time changes (if we have buildings from a previous analysis)
+  // Re-compute shadows when time changes (throttled to avoid lag during animation)
+  const shadowThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastShadowTimeRef = useRef<number>(0);
   useEffect(() => {
     if (!selectedPoint || analysisBuildings.length === 0) return;
 
-    const [lng, lat] = selectedPoint;
-    const sun = getSunPosition(currentTime, lat, lng);
+    const now = Date.now();
+    const elapsed = now - lastShadowTimeRef.current;
+    const THROTTLE_MS = 150; // max ~7 updates/sec
 
-    if (sun.altitude > 0.01) {
-      const buildingInputs = analysisBuildings.map((b) => ({
-        id: b.id, footprint: b.footprint, height: b.height,
-      }));
-      const shadows = calculateSimpleShadows(buildingInputs, sun.azimuth, sun.altitude, lat);
-      setAnalysisShadows(shadows);
+    const compute = () => {
+      lastShadowTimeRef.current = Date.now();
+      const [lng, lat] = selectedPoint;
+      const sun = getSunPosition(currentTime, lat, lng);
+
+      if (sun.altitude > 0.01) {
+        const buildingInputs = analysisBuildings.map((b) => ({
+          id: b.id, footprint: b.footprint, height: b.height,
+        }));
+        const shadows = calculateSimpleShadows(buildingInputs, sun.azimuth, sun.altitude, lat);
+        setAnalysisShadows(shadows);
+      } else {
+        setAnalysisShadows([]);
+      }
+    };
+
+    if (elapsed >= THROTTLE_MS) {
+      compute();
     } else {
-      setAnalysisShadows([]);
+      if (shadowThrottleRef.current) clearTimeout(shadowThrottleRef.current);
+      shadowThrottleRef.current = setTimeout(compute, THROTTLE_MS - elapsed);
     }
+
+    return () => {
+      if (shadowThrottleRef.current) clearTimeout(shadowThrottleRef.current);
+    };
   }, [currentTime, selectedPoint, analysisBuildings, setAnalysisShadows]);
 
-  // Toggle satellite layer
-  const toggleSatellite = useCallback(() => {
+  // Sync satellite layer visibility with prop
+  useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
-
-    const newState = !satelliteOn;
-    setSatelliteOn(newState);
-    map.setLayoutProperty(SATELLITE_LAYER, "visibility", newState ? "visible" : "none");
-    map.setPaintProperty(BUILDINGS_3D_LAYER, "fill-extrusion-opacity", newState ? 0.85 : 0.75);
+    map.setLayoutProperty(SATELLITE_LAYER, "visibility", satelliteOn ? "visible" : "none");
   }, [satelliteOn, mapLoaded]);
 
   // Update shadow layer on map
@@ -322,13 +357,18 @@ export function MapContainer({ pois = [], onPoiSelect }: MapContainerProps) {
         font-size:16px;background:rgba(255,255,255,0.92);
         border:2px solid #f59e0b;
         box-shadow:0 2px 6px rgba(0,0,0,0.25);
-        transition:transform 0.15s;
       `;
       el.textContent = CATEGORY_ICONS[poi.category];
       el.title = poi.name;
 
-      el.addEventListener("mouseenter", () => { el.style.transform = "scale(1.25)"; });
-      el.addEventListener("mouseleave", () => { el.style.transform = "scale(1)"; });
+      el.addEventListener("mouseenter", () => {
+        el.style.boxShadow = "0 0 0 3px rgba(245,158,11,0.5), 0 2px 8px rgba(0,0,0,0.3)";
+        el.style.borderColor = "#d97706";
+      });
+      el.addEventListener("mouseleave", () => {
+        el.style.boxShadow = "0 2px 6px rgba(0,0,0,0.25)";
+        el.style.borderColor = "#f59e0b";
+      });
       el.addEventListener("click", (e) => {
         e.stopPropagation();
         if (onPoiSelect) onPoiSelect(poi);
@@ -349,30 +389,6 @@ export function MapContainer({ pois = [], onPoiSelect }: MapContainerProps) {
   return (
     <div className="w-full h-full relative">
       <div ref={mapContainer} className="w-full h-full" />
-
-      {/* Satellite toggle */}
-      <button
-        type="button"
-        onClick={toggleSatellite}
-        className="absolute bottom-40 left-4 z-10 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2 cursor-pointer"
-        title={satelliteOn ? "Karte anzeigen" : "Satellit anzeigen"}
-      >
-        {satelliteOn ? (
-          <>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l5.447 2.724A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-            </svg>
-            Karte
-          </>
-        ) : (
-          <>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Satellit
-          </>
-        )}
-      </button>
 
       {/* Loading */}
       {isAnalyzing && (

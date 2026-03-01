@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { MapContainer } from "./components/map/MapContainer";
 import { TimeSlider } from "./components/controls/TimeSlider";
 import { SunInfoPanel } from "./components/controls/SunInfoPanel";
@@ -13,17 +13,24 @@ export function App() {
   const { pois, isLoading: poisLoading, showPOIs, togglePOIs, refetch } = usePOIs();
   const { analyzePoint } = usePointAnalysis();
   const setSelectedPOIName = useAnalysisStore((s) => s.setSelectedPOIName);
+  const [satelliteOn, setSatelliteOn] = useState(false);
+  const [showTimeBar, setShowTimeBar] = useState(false);
 
   const handlePoiSelect = useCallback((poi: POI) => {
     setSelectedPOIName(poi.name);
     analyzePoint(poi.location);
   }, [analyzePoint, setSelectedPOIName]);
 
+  const toggleSatellite = useCallback(() => {
+    setSatelliteOn((prev) => !prev);
+  }, []);
+
   return (
     <div className="h-screen w-screen relative overflow-hidden">
       <MapContainer
         pois={showPOIs ? pois : []}
         onPoiSelect={handlePoiSelect}
+        satelliteOn={satelliteOn}
       />
 
       {/* Top-center: Address search */}
@@ -39,40 +46,80 @@ export function App() {
       {/* Top-right: Point analysis results */}
       <PointAnalysisPanel />
 
-      {/* Bottom-left: POI toggle + refetch */}
-      <div className="absolute bottom-20 left-4 z-10 flex flex-col gap-2">
-        <button
-          type="button"
-          onClick={togglePOIs}
-          className={`bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
-            showPOIs
-              ? "text-amber-700 bg-amber-50/90 ring-2 ring-amber-400"
-              : "text-gray-700 hover:bg-gray-100"
-          }`}
-          title={showPOIs ? "Cafés ausblenden" : "Cafés anzeigen"}
-        >
-          <span className="text-base">{"\u2615"}</span>
-          {showPOIs ? "Cafés an" : "Cafés"}
-          {poisLoading && (
-            <div className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-          )}
-        </button>
-
-        {showPOIs && (
+      {/* Bottom: Controls + Time slider */}
+      <div className="absolute bottom-0 left-0 right-0 z-10">
+        {/* Toggle buttons row — sits above time bar */}
+        <div className="flex items-center gap-2 px-4 mb-2">
+          {/* Satellite toggle */}
           <button
             type="button"
-            onClick={refetch}
-            className="bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
-            title="Cafés in diesem Bereich neu laden"
+            onClick={toggleSatellite}
+            className={`bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+              satelliteOn
+                ? "text-blue-700 bg-blue-50/90 ring-2 ring-blue-400"
+                : "text-gray-700 hover:bg-gray-100"
+            }`}
+            title={satelliteOn ? "Karte anzeigen" : "Satellit anzeigen"}
           >
-            Hier suchen ({pois.length})
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {satelliteOn ? "Karte" : "Satellit"}
           </button>
-        )}
-      </div>
 
-      {/* Bottom: Time slider */}
-      <div className="absolute bottom-0 left-0 right-0 z-10">
-        <TimeSlider />
+          {/* Café toggle */}
+          <button
+            type="button"
+            onClick={togglePOIs}
+            className={`bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+              showPOIs
+                ? "text-amber-700 bg-amber-50/90 ring-2 ring-amber-400"
+                : "text-gray-700 hover:bg-gray-100"
+            }`}
+            title={showPOIs ? "Cafés ausblenden" : "Cafés anzeigen"}
+          >
+            <span className="text-base">{"\u2615"}</span>
+            Cafés
+            {poisLoading && (
+              <div className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+            )}
+          </button>
+
+          {/* Refetch near point */}
+          {showPOIs && pois.length > 0 && (
+            <button
+              type="button"
+              onClick={refetch}
+              className="bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+              title="Cafés neu laden"
+            >
+              {pois.length} Cafés
+            </button>
+          )}
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Time bar toggle */}
+          <button
+            type="button"
+            onClick={() => setShowTimeBar((prev) => !prev)}
+            className={`bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+              showTimeBar
+                ? "text-amber-700 bg-amber-50/90 ring-2 ring-amber-400"
+                : "text-gray-700 hover:bg-gray-100"
+            }`}
+            title={showTimeBar ? "Zeitleiste ausblenden" : "Zeitleiste anzeigen"}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Zeit
+          </button>
+        </div>
+
+        {/* Collapsible time slider */}
+        {showTimeBar && <TimeSlider />}
       </div>
     </div>
   );
