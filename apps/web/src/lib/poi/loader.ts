@@ -2,7 +2,8 @@ import type { POI, POICategory } from "../../types/poi";
 
 const OVERPASS_API = "https://overpass-api.de/api/interpreter";
 
-const CATEGORY_QUERIES: Record<POICategory, string> = {
+/** Overpass queries for categories fetched via OSM (sports use Vienna WFS instead) */
+const CATEGORY_QUERIES: Partial<Record<POICategory, string>> = {
   cafe: 'nwr["amenity"="cafe"]',
   restaurant: 'nwr["amenity"="restaurant"]',
   park: 'nwr["leisure"="park"]',
@@ -22,6 +23,7 @@ export async function fetchPOIsFromOverpass(
   const bboxStr = `${south},${west},${north},${east}`;
 
   const unions = categories
+    .filter((cat) => CATEGORY_QUERIES[cat])
     .map((cat) => `${CATEGORY_QUERIES[cat]}(${bboxStr});`)
     .join("\n");
 
@@ -114,5 +116,11 @@ function categoryLabel(cat: POICategory): string {
       return "Park";
     case "beer_garden":
       return "Biergarten";
+    case "table_tennis":
+      return "Tischtennis";
+    case "volleyball":
+      return "Volleyball";
+    case "basketball":
+      return "Basketball";
   }
 }

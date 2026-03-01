@@ -2,6 +2,7 @@ import type { Polygon, MultiPolygon } from "geojson";
 
 export interface ShadowPolygon {
   buildingId: string;
+  sourceType?: "building" | "tree";
   geometry: Polygon | MultiPolygon;
 }
 

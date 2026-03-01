@@ -7,7 +7,11 @@ import { useAnalysisStore } from "../../store/analysisStore";
 import { useTimeStore } from "../../store/timeStore";
 import { usePointAnalysis } from "../../hooks/usePointAnalysis";
 import { getSunPosition } from "../../lib/sun/position";
+import * as turf from "@turf/turf";
 import { calculateSimpleShadows } from "../../lib/shadow/projection";
+import { effectiveCanopyRadius } from "../../lib/trees/loader";
+import type { ShadowPolygon } from "../../types/shadow";
+import type { POI, POICategory } from "../../types/poi";
 
 // OpenFreeMap: free, no API key, includes OpenMapTiles vector data with buildings
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
@@ -17,15 +21,56 @@ const SATELLITE_TILES = "https://services.arcgisonline.com/arcgis/rest/services/
 
 const SHADOW_SOURCE = "analysis-shadows";
 const SHADOW_LAYER = "analysis-shadow-layer";
+const TREE_SHADOW_SOURCE = "tree-shadows";
+const TREE_SHADOW_LAYER = "tree-shadow-layer";
 const SATELLITE_SOURCE = "satellite-imagery";
 const SATELLITE_LAYER = "satellite-layer";
 const BUILDINGS_3D_LAYER = "3d-buildings";
 
-export function MapContainer() {
+const METERS_PER_DEGREE_LAT = 111_320;
+
+function buildCanopyPoly(center: [number, number], radiusMeters: number, lat: number): Polygon {
+  const segments = 12;
+  const coords: [number, number][] = [];
+  for (let i = 0; i <= segments; i++) {
+    const angle = (2 * Math.PI * i) / segments;
+    const dx = radiusMeters * Math.cos(angle) / (METERS_PER_DEGREE_LAT * Math.cos((lat * Math.PI) / 180));
+    const dy = radiusMeters * Math.sin(angle) / METERS_PER_DEGREE_LAT;
+    coords.push([center[0] + dx, center[1] + dy]);
+  }
+  return { type: "Polygon", coordinates: [coords] };
+}
+
+const CATEGORY_ICONS: Record<POICategory, string> = {
+  cafe: "\u2615",
+  restaurant: "\uD83C\uDF7D\uFE0F",
+  beer_garden: "\uD83C\uDF7A",
+  park: "\uD83C\uDF33",
+  table_tennis: "\uD83C\uDFD3",
+  volleyball: "\uD83C\uDFD0",
+  basketball: "\uD83C\uDFC0",
+};
+
+const CATEGORY_COLORS: Record<POICategory, string> = {
+  cafe: "#f59e0b",
+  restaurant: "#f59e0b",
+  beer_garden: "#f59e0b",
+  park: "#22c55e",
+  table_tennis: "#3b82f6",
+  volleyball: "#3b82f6",
+  basketball: "#3b82f6",
+};
+
+interface MapContainerProps {
+  pois?: POI[];
+  onPoiSelect?: (poi: POI) => void;
+  satelliteOn?: boolean;
+}
+
+export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: MapContainerProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [satelliteOn, setSatelliteOn] = useState(false);
 
   const center = useMapStore((s) => s.center);
   const zoom = useMapStore((s) => s.zoom);
@@ -38,8 +83,12 @@ export function MapContainer() {
   const { analyzePoint } = usePointAnalysis();
   const selectedPoint = useAnalysisStore((s) => s.selectedPoint);
   const analysisShadows = useAnalysisStore((s) => s.analysisShadows);
+  const treeShadows = useAnalysisStore((s) => s.treeShadows);
   const analysisBuildings = useAnalysisStore((s) => s.analysisBuildings);
+  const analysisTrees = useAnalysisStore((s) => s.analysisTrees);
+  const showTreeShadows = useAnalysisStore((s) => s.showTreeShadows);
   const setAnalysisShadows = useAnalysisStore((s) => s.setAnalysisShadows);
+  const setTreeShadowsStore = useAnalysisStore((s) => s.setTreeShadows);
   const isAnalyzing = useAnalysisStore((s) => s.isAnalyzing);
   const currentTime = useTimeStore((s) => s.currentTime);
   const markerRef = useRef<maplibregl.Marker | null>(null);
@@ -126,6 +175,27 @@ export function MapContainer() {
         labelLayerId,
       );
 
+      // Tree shadow source + layer — greenish, lower opacity for dappled light
+      map.addSource(TREE_SHADOW_SOURCE, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+
+      map.addLayer(
+        {
+          id: TREE_SHADOW_LAYER,
+          type: "fill",
+          source: TREE_SHADOW_SOURCE,
+          layout: { visibility: "none" },
+          paint: {
+            "fill-color": "#2d4a2d",
+            "fill-opacity": 0.2,
+            "fill-antialias": true,
+          },
+        },
+        labelLayerId,
+      );
+
       // 3D building extrusions from OpenFreeMap vector tiles
       map.addLayer(
         {
@@ -146,12 +216,28 @@ export function MapContainer() {
 
       updateMapState(map);
       setMapLoaded(true);
+
+      // Fly to user's geolocation if available
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            map.flyTo({
+              center: [pos.coords.longitude, pos.coords.latitude],
+              zoom: 15,
+              duration: 2000,
+            });
+          },
+          () => { /* denied or error — stay at default */ },
+          { enableHighAccuracy: true, timeout: 8000 },
+        );
+      }
     });
 
     map.on("moveend", () => updateMapState(map));
 
-    // Click = analyze that point
+    // Click = analyze that point (clear POI name since it's a direct map click)
     map.on("click", (e) => {
+      useAnalysisStore.getState().setSelectedPOIName(null);
       analyzePoint([e.lngLat.lng, e.lngLat.lat]);
     });
 
@@ -186,7 +272,9 @@ export function MapContainer() {
       });
 
       map.setPaintProperty(BUILDINGS_3D_LAYER, "fill-extrusion-color",
-        satelliteOn ? "#b0b0b8" : "#e0e0e4");
+        satelliteOn ? "#c8c8d0" : "#e0e0e4");
+      map.setPaintProperty(BUILDINGS_3D_LAYER, "fill-extrusion-opacity",
+        satelliteOn ? 0.35 : 0.75);
     } else {
       // Night: dim flat lighting
       map.setLight({
@@ -196,37 +284,86 @@ export function MapContainer() {
         color: "#c0c8d8",
       });
       map.setPaintProperty(BUILDINGS_3D_LAYER, "fill-extrusion-color",
-        satelliteOn ? "#808088" : "#b0b0b8");
+        satelliteOn ? "#909098" : "#b0b0b8");
+      map.setPaintProperty(BUILDINGS_3D_LAYER, "fill-extrusion-opacity",
+        satelliteOn ? 0.3 : 0.75);
     }
   }, [currentTime, center, mapLoaded, satelliteOn]);
 
-  // Re-compute shadows when time changes (if we have buildings from a previous analysis)
+  // Re-compute shadows when time changes (throttled to avoid lag during animation)
+  const shadowThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastShadowTimeRef = useRef<number>(0);
   useEffect(() => {
     if (!selectedPoint || analysisBuildings.length === 0) return;
 
-    const [lng, lat] = selectedPoint;
-    const sun = getSunPosition(currentTime, lat, lng);
+    const now = Date.now();
+    const elapsed = now - lastShadowTimeRef.current;
+    const THROTTLE_MS = 150; // max ~7 updates/sec
 
-    if (sun.altitude > 0.01) {
-      const buildingInputs = analysisBuildings.map((b) => ({
-        id: b.id, footprint: b.footprint, height: b.height,
-      }));
-      const shadows = calculateSimpleShadows(buildingInputs, sun.azimuth, sun.altitude, lat);
-      setAnalysisShadows(shadows);
+    const compute = () => {
+      lastShadowTimeRef.current = Date.now();
+      const [lng, lat] = selectedPoint;
+      const sun = getSunPosition(currentTime, lat, lng);
+
+      if (sun.altitude > 0.01) {
+        const buildingInputs = analysisBuildings.map((b) => ({
+          id: b.id, footprint: b.footprint, height: b.height,
+        }));
+
+        const shadows = calculateSimpleShadows(buildingInputs, sun.azimuth, sun.altitude, lat);
+        setAnalysisShadows(shadows);
+
+        // Tree shadows (convex hull approach — robust for small canopy polygons)
+        if (analysisTrees.length > 0 && showTreeShadows) {
+          const sinAngle = Math.sin(sun.azimuth);
+          const cosAngle = Math.cos(sun.azimuth);
+          const tShadows: ShadowPolygon[] = [];
+          for (const tree of analysisTrees) {
+            const radius = effectiveCanopyRadius(tree, currentTime);
+            const canopy = buildCanopyPoly(tree.location, radius, lat);
+            const coords = canopy.coordinates[0];
+            const shadowLength = tree.height / Math.tan(sun.altitude);
+            const dxDeg = shadowLength * sinAngle / (METERS_PER_DEGREE_LAT * Math.cos((lat * Math.PI) / 180));
+            const dyDeg = shadowLength * cosAngle / METERS_PER_DEGREE_LAT;
+            const shadowCoords = coords.map((c) => [c[0] + dxDeg, c[1] + dyDeg]);
+            try {
+              const allPoints = turf.featureCollection([
+                ...coords.map((c) => turf.point(c)),
+                ...shadowCoords.map((c) => turf.point(c)),
+              ]);
+              const hull = turf.convex(allPoints);
+              if (hull) {
+                tShadows.push({ buildingId: tree.id, geometry: hull.geometry as Polygon, sourceType: "tree" });
+              }
+            } catch { /* skip invalid */ }
+          }
+          setTreeShadowsStore(tShadows);
+        } else {
+          setTreeShadowsStore([]);
+        }
+      } else {
+        setAnalysisShadows([]);
+        setTreeShadowsStore([]);
+      }
+    };
+
+    if (elapsed >= THROTTLE_MS) {
+      compute();
     } else {
-      setAnalysisShadows([]);
+      if (shadowThrottleRef.current) clearTimeout(shadowThrottleRef.current);
+      shadowThrottleRef.current = setTimeout(compute, THROTTLE_MS - elapsed);
     }
-  }, [currentTime, selectedPoint, analysisBuildings, setAnalysisShadows]);
 
-  // Toggle satellite layer
-  const toggleSatellite = useCallback(() => {
+    return () => {
+      if (shadowThrottleRef.current) clearTimeout(shadowThrottleRef.current);
+    };
+  }, [currentTime, selectedPoint, analysisBuildings, analysisTrees, showTreeShadows, setAnalysisShadows, setTreeShadowsStore]);
+
+  // Sync satellite layer visibility with prop
+  useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapLoaded) return;
-
-    const newState = !satelliteOn;
-    setSatelliteOn(newState);
-    map.setLayoutProperty(SATELLITE_LAYER, "visibility", newState ? "visible" : "none");
-    map.setPaintProperty(BUILDINGS_3D_LAYER, "fill-extrusion-opacity", newState ? 0.85 : 0.75);
+    map.setLayoutProperty(SATELLITE_LAYER, "visibility", satelliteOn ? "visible" : "none");
   }, [satelliteOn, mapLoaded]);
 
   // Update shadow layer on map
@@ -253,6 +390,38 @@ export function MapContainer() {
 
     source.setData(geojson);
   }, [analysisShadows, mapLoaded]);
+
+  // Update tree shadow layer on map
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    const source = map.getSource(TREE_SHADOW_SOURCE) as maplibregl.GeoJSONSource;
+    if (!source) return;
+
+    if (!showTreeShadows || treeShadows.length === 0) {
+      source.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+
+    const geojson: FeatureCollection<Polygon | MultiPolygon> = {
+      type: "FeatureCollection",
+      features: treeShadows.map((s) => ({
+        type: "Feature" as const,
+        properties: { buildingId: s.buildingId },
+        geometry: s.geometry,
+      })),
+    };
+
+    source.setData(geojson);
+  }, [treeShadows, showTreeShadows, mapLoaded]);
+
+  // Sync tree shadow layer visibility
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    map.setLayoutProperty(TREE_SHADOW_LAYER, "visibility", showTreeShadows ? "visible" : "none");
+  }, [showTreeShadows, mapLoaded]);
 
   // Show/hide marker + fly to point
   const prevPointRef = useRef<[number, number] | null>(null);
@@ -290,33 +459,57 @@ export function MapContainer() {
     }
   }, [selectedPoint, mapLoaded]);
 
+  // POI markers
+  const poiMarkersRef = useRef<maplibregl.Marker[]>([]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    // Clear old markers
+    for (const m of poiMarkersRef.current) m.remove();
+    poiMarkersRef.current = [];
+
+    for (const poi of pois) {
+      const color = CATEGORY_COLORS[poi.category] || "#f59e0b";
+      const el = document.createElement("div");
+      el.style.cssText = `
+        display:flex;align-items:center;justify-content:center;
+        width:32px;height:32px;border-radius:50%;cursor:pointer;
+        font-size:16px;background:rgba(255,255,255,0.92);
+        border:2px solid ${color};
+        box-shadow:0 2px 6px rgba(0,0,0,0.25);
+      `;
+      el.textContent = CATEGORY_ICONS[poi.category];
+      el.title = poi.name;
+
+      el.addEventListener("mouseenter", () => {
+        el.style.boxShadow = `0 0 0 3px ${color}80, 0 2px 8px rgba(0,0,0,0.3)`;
+        el.style.borderColor = color;
+      });
+      el.addEventListener("mouseleave", () => {
+        el.style.boxShadow = "0 2px 6px rgba(0,0,0,0.25)";
+        el.style.borderColor = color;
+      });
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (onPoiSelect) onPoiSelect(poi);
+      });
+
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat(poi.location)
+        .addTo(map);
+      poiMarkersRef.current.push(marker);
+    }
+
+    return () => {
+      for (const m of poiMarkersRef.current) m.remove();
+      poiMarkersRef.current = [];
+    };
+  }, [pois, mapLoaded, onPoiSelect]);
+
   return (
     <div className="w-full h-full relative">
       <div ref={mapContainer} className="w-full h-full" />
-
-      {/* Satellite toggle */}
-      <button
-        type="button"
-        onClick={toggleSatellite}
-        className="absolute bottom-16 left-4 z-10 bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-2 cursor-pointer"
-        title={satelliteOn ? "Karte anzeigen" : "Satellit anzeigen"}
-      >
-        {satelliteOn ? (
-          <>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l5.447 2.724A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-            </svg>
-            Karte
-          </>
-        ) : (
-          <>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            Satellit
-          </>
-        )}
-      </button>
 
       {/* Loading */}
       {isAnalyzing && (
