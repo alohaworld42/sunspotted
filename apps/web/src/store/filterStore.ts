@@ -1,6 +1,5 @@
 import { create } from "zustand";
-
-type POICategory = "cafe" | "restaurant" | "park" | "beer_garden";
+import type { POICategory } from "../types/poi";
 
 interface FilterState {
   categories: POICategory[];

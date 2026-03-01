@@ -15,6 +15,9 @@ const CATEGORY_ICONS: Record<POICategory, string> = {
   restaurant: "\uD83C\uDF7D\uFE0F",
   beer_garden: "\uD83C\uDF7A",
   park: "\uD83C\uDF33",
+  table_tennis: "\uD83C\uDFD3",
+  volleyball: "\uD83C\uDFD0",
+  basketball: "\uD83C\uDFC0",
 };
 
 export function POIMarkers({ map, pois, sunScores, onSelect }: POIMarkersProps) {

@@ -11,6 +11,9 @@ const CATEGORY_LABELS: Record<POICategory, string> = {
   restaurant: "Restaurant",
   beer_garden: "Biergarten",
   park: "Park",
+  table_tennis: "Tischtennis",
+  volleyball: "Volleyball",
+  basketball: "Basketball",
 };
 
 export function POIDetailCard({ poi, sunScore, onClose }: POIDetailCardProps) {

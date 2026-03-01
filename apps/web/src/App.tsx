@@ -6,11 +6,13 @@ import { AddressSearch } from "./components/controls/AddressSearch";
 import { PointAnalysisPanel } from "./components/analysis/PointAnalysisPanel";
 import { usePointAnalysis } from "./hooks/usePointAnalysis";
 import { usePOIs } from "./hooks/usePOIs";
+import { useSportPOIs } from "./hooks/useSportPOIs";
 import { useAnalysisStore } from "./store/analysisStore";
 import type { POI } from "./types/poi";
 
 export function App() {
   const { pois, isLoading: poisLoading, showPOIs, togglePOIs, refetch } = usePOIs();
+  const { pois: sportPois, isLoading: sportsLoading, showSports, toggleSports } = useSportPOIs();
   const { analyzePoint } = usePointAnalysis();
   const setSelectedPOIName = useAnalysisStore((s) => s.setSelectedPOIName);
   const selectedPoint = useAnalysisStore((s) => s.selectedPoint);
@@ -31,7 +33,7 @@ export function App() {
   return (
     <div className="h-screen w-screen relative overflow-hidden">
       <MapContainer
-        pois={showPOIs ? pois : []}
+        pois={[...(showPOIs ? pois : []), ...(showSports ? sportPois : [])]}
         onPoiSelect={handlePoiSelect}
         satelliteOn={satelliteOn}
       />
@@ -100,6 +102,24 @@ export function App() {
           title={showTreeShadows ? "Baumschatten ausblenden" : "Baumschatten anzeigen"}
         >
           <span className="text-base">{"\uD83C\uDF33"}</span>
+        </button>
+
+        {/* Sport facilities toggle */}
+        <button
+          type="button"
+          onClick={toggleSports}
+          className={`bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+            showSports
+              ? "text-blue-700 bg-blue-50/90 ring-2 ring-blue-400"
+              : "text-gray-700 hover:bg-gray-100"
+          }`}
+          title={showSports ? "Sport ausblenden" : "Sport anzeigen"}
+        >
+          <span className="text-base">{"\uD83C\uDFD3"}</span>
+          Sport
+          {sportsLoading && (
+            <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          )}
         </button>
 
         {/* Refetch near point */}

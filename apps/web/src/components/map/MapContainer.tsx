@@ -46,6 +46,19 @@ const CATEGORY_ICONS: Record<POICategory, string> = {
   restaurant: "\uD83C\uDF7D\uFE0F",
   beer_garden: "\uD83C\uDF7A",
   park: "\uD83C\uDF33",
+  table_tennis: "\uD83C\uDFD3",
+  volleyball: "\uD83C\uDFD0",
+  basketball: "\uD83C\uDFC0",
+};
+
+const CATEGORY_COLORS: Record<POICategory, string> = {
+  cafe: "#f59e0b",
+  restaurant: "#f59e0b",
+  beer_garden: "#f59e0b",
+  park: "#22c55e",
+  table_tennis: "#3b82f6",
+  volleyball: "#3b82f6",
+  basketball: "#3b82f6",
 };
 
 interface MapContainerProps {
@@ -457,24 +470,25 @@ export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: Ma
     poiMarkersRef.current = [];
 
     for (const poi of pois) {
+      const color = CATEGORY_COLORS[poi.category] || "#f59e0b";
       const el = document.createElement("div");
       el.style.cssText = `
         display:flex;align-items:center;justify-content:center;
         width:32px;height:32px;border-radius:50%;cursor:pointer;
         font-size:16px;background:rgba(255,255,255,0.92);
-        border:2px solid #f59e0b;
+        border:2px solid ${color};
         box-shadow:0 2px 6px rgba(0,0,0,0.25);
       `;
       el.textContent = CATEGORY_ICONS[poi.category];
       el.title = poi.name;
 
       el.addEventListener("mouseenter", () => {
-        el.style.boxShadow = "0 0 0 3px rgba(245,158,11,0.5), 0 2px 8px rgba(0,0,0,0.3)";
-        el.style.borderColor = "#d97706";
+        el.style.boxShadow = `0 0 0 3px ${color}80, 0 2px 8px rgba(0,0,0,0.3)`;
+        el.style.borderColor = color;
       });
       el.addEventListener("mouseleave", () => {
         el.style.boxShadow = "0 2px 6px rgba(0,0,0,0.25)";
-        el.style.borderColor = "#f59e0b";
+        el.style.borderColor = color;
       });
       el.addEventListener("click", (e) => {
         e.stopPropagation();
