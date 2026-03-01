@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { MapContainer } from "./components/map/MapContainer";
 import { TimeSlider } from "./components/controls/TimeSlider";
 import { SunInfoPanel } from "./components/controls/SunInfoPanel";
@@ -9,8 +9,13 @@ import { usePOIs } from "./hooks/usePOIs";
 import { useSportPOIs } from "./hooks/useSportPOIs";
 import { useAnalysisStore } from "./store/analysisStore";
 import type { POI } from "./types/poi";
+import { initWasm } from "./lib/wasm/engine";
 
 export function App() {
+  // Initialize WASM engine on mount (non-blocking)
+  useEffect(() => {
+    initWasm();
+  }, []);
   const { pois, isLoading: poisLoading, showPOIs, togglePOIs, refetch } = usePOIs();
   const { pois: sportPois, isLoading: sportsLoading, showSports, toggleSports } = useSportPOIs();
   const { analyzePoint } = usePointAnalysis();

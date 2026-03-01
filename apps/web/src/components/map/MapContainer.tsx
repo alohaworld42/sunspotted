@@ -12,6 +12,7 @@ import { calculateSimpleShadows } from "../../lib/shadow/projection";
 import { effectiveCanopyRadius } from "../../lib/trees/loader";
 import type { ShadowPolygon } from "../../types/shadow";
 import type { POI, POICategory } from "../../types/poi";
+import { isWasmReady, calculateShadowsWasm, calculateTreeShadowsWasm } from "../../lib/wasm/engine";
 
 // OpenFreeMap: free, no API key, includes OpenMapTiles vector data with buildings
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
@@ -306,36 +307,52 @@ export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: Ma
       const sun = getSunPosition(currentTime, lat, lng);
 
       if (sun.altitude > 0.01) {
-        const buildingInputs = analysisBuildings.map((b) => ({
-          id: b.id, footprint: b.footprint, height: b.height,
-        }));
+        const useWasm = isWasmReady();
 
-        const shadows = calculateSimpleShadows(buildingInputs, sun.azimuth, sun.altitude, lat);
+        // Building shadows — try WASM, fall back to JS
+        let shadows: ShadowPolygon[] | null = null;
+        if (useWasm) {
+          shadows = calculateShadowsWasm(analysisBuildings, sun.azimuth, sun.altitude, lat);
+        }
+        if (!shadows) {
+          const buildingInputs = analysisBuildings.map((b) => ({
+            id: b.id, footprint: b.footprint, height: b.height,
+          }));
+          shadows = calculateSimpleShadows(buildingInputs, sun.azimuth, sun.altitude, lat);
+        }
         setAnalysisShadows(shadows);
 
-        // Tree shadows (convex hull approach — robust for small canopy polygons)
+        // Tree shadows — try WASM, fall back to JS convex hull approach
         if (analysisTrees.length > 0 && showTreeShadows) {
-          const sinAngle = Math.sin(sun.azimuth);
-          const cosAngle = Math.cos(sun.azimuth);
-          const tShadows: ShadowPolygon[] = [];
-          for (const tree of analysisTrees) {
-            const radius = effectiveCanopyRadius(tree, currentTime);
-            const canopy = buildCanopyPoly(tree.location, radius, lat);
-            const coords = canopy.coordinates[0];
-            const shadowLength = tree.height / Math.tan(sun.altitude);
-            const dxDeg = shadowLength * sinAngle / (METERS_PER_DEGREE_LAT * Math.cos((lat * Math.PI) / 180));
-            const dyDeg = shadowLength * cosAngle / METERS_PER_DEGREE_LAT;
-            const shadowCoords = coords.map((c) => [c[0] + dxDeg, c[1] + dyDeg]);
-            try {
-              const allPoints = turf.featureCollection([
-                ...coords.map((c) => turf.point(c)),
-                ...shadowCoords.map((c) => turf.point(c)),
-              ]);
-              const hull = turf.convex(allPoints);
-              if (hull) {
-                tShadows.push({ buildingId: tree.id, geometry: hull.geometry as Polygon, sourceType: "tree" });
-              }
-            } catch { /* skip invalid */ }
+          let tShadows: ShadowPolygon[] | null = null;
+          if (useWasm) {
+            tShadows = calculateTreeShadowsWasm(
+              analysisTrees, sun.azimuth, sun.altitude, lat, currentTime.getMonth() + 1,
+            );
+          }
+          if (!tShadows) {
+            const sinAngle = Math.sin(sun.azimuth);
+            const cosAngle = Math.cos(sun.azimuth);
+            tShadows = [];
+            for (const tree of analysisTrees) {
+              const radius = effectiveCanopyRadius(tree, currentTime);
+              const canopy = buildCanopyPoly(tree.location, radius, lat);
+              const coords = canopy.coordinates[0];
+              const shadowLength = tree.height / Math.tan(sun.altitude);
+              const dxDeg = shadowLength * sinAngle / (METERS_PER_DEGREE_LAT * Math.cos((lat * Math.PI) / 180));
+              const dyDeg = shadowLength * cosAngle / METERS_PER_DEGREE_LAT;
+              const shadowCoords = coords.map((c) => [c[0] + dxDeg, c[1] + dyDeg]);
+              try {
+                const allPoints = turf.featureCollection([
+                  ...coords.map((c) => turf.point(c)),
+                  ...shadowCoords.map((c) => turf.point(c)),
+                ]);
+                const hull = turf.convex(allPoints);
+                if (hull) {
+                  tShadows.push({ buildingId: tree.id, geometry: hull.geometry as Polygon, sourceType: "tree" });
+                }
+              } catch { /* skip invalid */ }
+            }
           }
           setTreeShadowsStore(tShadows);
         } else {

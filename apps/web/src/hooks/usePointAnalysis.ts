@@ -10,6 +10,12 @@ import { useTimeStore } from "../store/timeStore";
 import { fetchBuildingsFromOverpass } from "../lib/buildings/loader";
 import { fetchTreesFromOverpass, effectiveCanopyRadius } from "../lib/trees/loader";
 import type { ShadowPolygon } from "../types/shadow";
+import {
+  isWasmReady,
+  analyzePointWasm,
+  calculateShadowsWasm,
+  calculateTreeShadowsWasm,
+} from "../lib/wasm/engine";
 
 const SIMULATION_INTERVAL_MIN = 10;
 /** Radius in degrees around the clicked point to fetch buildings (~150m) */
@@ -124,23 +130,46 @@ export function usePointAnalysis() {
         setAnalysisBuildings(buildings);
         setAnalysisTrees(trees);
 
-        // Compute analysis (includes tree shadows in point-in-shadow checks)
-        const result = computeAnalysis(lngLat, buildings, trees, currentTime);
+        // Try WASM first, fall back to JS
+        const useWasm = isWasmReady();
+        let result: PointAnalysisResult | null = null;
+
+        if (useWasm) {
+          result = analyzePointWasm(lngLat, buildings, trees, currentTime);
+        }
+        if (!result) {
+          // JS fallback
+          result = computeAnalysis(lngLat, buildings, trees, currentTime);
+        }
         setAnalysisResult(result);
 
         // Compute current shadows for map display
         const sun = getSunPosition(currentTime, lat, lng);
         if (sun.altitude > 0.01) {
-          const buildingInputs = buildings.map((b) => ({
-            id: b.id, footprint: b.footprint, height: b.height,
-          }));
-
-          const shadows = calculateSimpleShadows(buildingInputs, sun.azimuth, sun.altitude, lat);
+          // Try WASM shadows, fall back to JS
+          let shadows: ShadowPolygon[] | null = null;
+          if (useWasm) {
+            shadows = calculateShadowsWasm(buildings, sun.azimuth, sun.altitude, lat);
+          }
+          if (!shadows) {
+            const buildingInputs = buildings.map((b) => ({
+              id: b.id, footprint: b.footprint, height: b.height,
+            }));
+            shadows = calculateSimpleShadows(buildingInputs, sun.azimuth, sun.altitude, lat);
+          }
           setAnalysisShadows(shadows);
 
           // Tree shadows
           if (trees.length > 0) {
-            const tShadows = calculateTreeShadows(trees, sun.azimuth, sun.altitude, lat, currentTime);
+            let tShadows: ShadowPolygon[] | null = null;
+            if (useWasm) {
+              tShadows = calculateTreeShadowsWasm(
+                trees, sun.azimuth, sun.altitude, lat, currentTime.getMonth() + 1,
+              );
+            }
+            if (!tShadows) {
+              tShadows = calculateTreeShadows(trees, sun.azimuth, sun.altitude, lat, currentTime);
+            }
             setTreeShadowsStore(tShadows);
           }
         }
