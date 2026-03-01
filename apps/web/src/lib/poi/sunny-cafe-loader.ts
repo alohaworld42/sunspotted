@@ -20,7 +20,7 @@ export async function fetchSunnyCafes(
     (
       nwr["amenity"="cafe"](${bboxStr});
       nwr["amenity"="biergarten"](${bboxStr});
-      nwr["amenity"="restaurant"]["outdoor_seating"="yes"](${bboxStr});
+      nwr["amenity"="restaurant"]["outdoor_seating"]["outdoor_seating"!="no"](${bboxStr});
       nwr["amenity"="restaurant"]["cuisine"~"ice_cream|coffee"](${bboxStr});
     );
     out center tags;
@@ -62,7 +62,7 @@ function parseSunnyCafes(elements: OverpassElement[]): POI[] {
     if (!lat || !lon || !el.tags) continue;
 
     const hasOutdoor =
-      el.tags.outdoor_seating === "yes" ||
+      (el.tags.outdoor_seating != null && el.tags.outdoor_seating !== "no") ||
       el.tags.beer_garden === "yes" ||
       el.tags.amenity === "biergarten" ||
       el.tags.garden === "yes" ||
