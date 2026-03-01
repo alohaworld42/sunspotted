@@ -5,7 +5,7 @@ import { calculateShadows } from "../shadow/projection";
 import { BuildingSpatialIndex } from "../shadow/spatial-index";
 
 const INTERVAL_MIN = 15;
-const SEARCH_RADIUS_DEG = 0.003; // ~300m
+const SEARCH_RADIUS_DEG = 0.006; // ~600m
 
 /**
  * Calculate sun score for a single POI by simulating shadow state

@@ -12,8 +12,8 @@ import { fetchTreesFromOverpass, effectiveCanopyRadius } from "../lib/trees/load
 import type { ShadowPolygon } from "../types/shadow";
 
 const SIMULATION_INTERVAL_MIN = 10;
-/** Radius in degrees around the clicked point to fetch buildings (~150m) */
-const ANALYSIS_RADIUS_DEG = 0.0015;
+/** Radius in degrees around the clicked point to fetch buildings (~500m) */
+const ANALYSIS_RADIUS_DEG = 0.005;
 
 /**
  * Compute tree shadows for a given sun position.

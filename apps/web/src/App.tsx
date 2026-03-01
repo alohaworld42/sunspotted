@@ -4,15 +4,18 @@ import { TimeSlider } from "./components/controls/TimeSlider";
 import { SunInfoPanel } from "./components/controls/SunInfoPanel";
 import { AddressSearch } from "./components/controls/AddressSearch";
 import { PointAnalysisPanel } from "./components/analysis/PointAnalysisPanel";
+import { SunnyCafePanel } from "./components/analysis/SunnyCafePanel";
 import { usePointAnalysis } from "./hooks/usePointAnalysis";
 import { usePOIs } from "./hooks/usePOIs";
 import { useSportPOIs } from "./hooks/useSportPOIs";
+import { useSunnyCafes } from "./hooks/useSunnyCafes";
 import { useAnalysisStore } from "./store/analysisStore";
 import type { POI } from "./types/poi";
 
 export function App() {
   const { pois, isLoading: poisLoading, showPOIs, togglePOIs, refetch } = usePOIs();
   const { pois: sportPois, isLoading: sportsLoading, showSports, toggleSports } = useSportPOIs();
+  const { cafes, sunScores, isSearching, hasSearched, findSunnyCafes, clear: clearSunnyCafes } = useSunnyCafes();
   const { analyzePoint } = usePointAnalysis();
   const setSelectedPOIName = useAnalysisStore((s) => s.setSelectedPOIName);
   const selectedPoint = useAnalysisStore((s) => s.selectedPoint);
@@ -30,10 +33,17 @@ export function App() {
     setSatelliteOn((prev) => !prev);
   }, []);
 
+  // Combine all POIs for map display (regular + sport + sunny cafés)
+  const allMapPois = [
+    ...(showPOIs ? pois : []),
+    ...(showSports ? sportPois : []),
+    ...(hasSearched ? cafes : []),
+  ];
+
   return (
     <div className="h-screen w-screen relative overflow-hidden">
       <MapContainer
-        pois={[...(showPOIs ? pois : []), ...(showSports ? sportPois : [])]}
+        pois={allMapPois}
         onPoiSelect={handlePoiSelect}
         satelliteOn={satelliteOn}
       />
@@ -54,7 +64,7 @@ export function App() {
       <PointAnalysisPanel />
 
       {/* Top: Toggle buttons row — below search bar */}
-      <div className="absolute top-16 left-0 right-0 z-10 flex items-center gap-2 px-4">
+      <div className="absolute top-16 left-0 right-0 z-10 flex items-center gap-2 px-4 flex-wrap">
         {/* Satellite toggle */}
         <button
           type="button"
@@ -84,9 +94,27 @@ export function App() {
           title={showPOIs ? "Cafés ausblenden" : "Cafés anzeigen"}
         >
           <span className="text-base">{"\u2615"}</span>
-          Cafés
+          Caf&eacute;s
           {poisLoading && (
             <div className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+          )}
+        </button>
+
+        {/* Best Sunny Cafés button */}
+        <button
+          type="button"
+          onClick={hasSearched ? clearSunnyCafes : findSunnyCafes}
+          className={`bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-sm font-medium transition-colors flex items-center gap-2 cursor-pointer ${
+            hasSearched
+              ? "text-orange-700 bg-orange-50/90 ring-2 ring-orange-400"
+              : "text-gray-700 hover:bg-gray-100"
+          }`}
+          title={hasSearched ? "Sonnige Cafés ausblenden" : "Beste sonnige Cafés finden"}
+        >
+          <span className="text-base">{"\u2600\uFE0F"}</span>
+          Sonnige Caf&eacute;s
+          {isSearching && (
+            <div className="w-3 h-3 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
           )}
         </button>
 
@@ -130,7 +158,7 @@ export function App() {
             className="bg-white/90 backdrop-blur-sm rounded-lg shadow-lg px-3 py-2 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
             title="Cafés neu laden"
           >
-            {pois.length} Cafés
+            {pois.length} Caf&eacute;s
           </button>
         )}
 
@@ -154,6 +182,17 @@ export function App() {
           Zeit
         </button>
       </div>
+
+      {/* Bottom-left: Sunny Cafés ranking panel */}
+      {hasSearched && (
+        <SunnyCafePanel
+          cafes={cafes}
+          sunScores={sunScores}
+          isSearching={isSearching}
+          onSelect={handlePoiSelect}
+          onClose={clearSunnyCafes}
+        />
+      )}
 
       {/* Bottom: Collapsible time slider */}
       {showTimeBar && (

@@ -73,7 +73,7 @@ function parseOverpassPOIs(
     if (!category) continue;
 
     const hasOutdoor =
-      el.tags.outdoor_seating === "yes" ||
+      (el.tags.outdoor_seating != null && el.tags.outdoor_seating !== "no") ||
       el.tags.beer_garden === "yes" ||
       category === "park" ||
       category === "beer_garden";

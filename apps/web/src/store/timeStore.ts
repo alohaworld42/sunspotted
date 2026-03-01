@@ -19,7 +19,7 @@ export const useTimeStore = create<TimeState>((set) => ({
   playSpeed: 1,
 
   setTime: (time) => set({ currentTime: time, isLive: false }),
-  setLive: (live) => set({ isLive: live, currentTime: live ? new Date() : undefined }),
+  setLive: (live) => set((state) => ({ isLive: live, currentTime: live ? new Date() : state.currentTime })),
   setPlaying: (playing) => set({ isPlaying: playing, isLive: false }),
   setPlaySpeed: (speed) => set({ playSpeed: speed }),
   resetToNow: () => set({ currentTime: new Date(), isLive: true, isPlaying: false }),

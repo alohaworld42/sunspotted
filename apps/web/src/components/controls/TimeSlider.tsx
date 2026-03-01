@@ -58,6 +58,14 @@ export function TimeSlider() {
     [currentTime, setTime],
   );
 
+  // Track current simulated time in a ref so the animation loop always reads the latest value
+  const simulatedTimeRef = useRef<number>(currentTime.getTime());
+  simulatedTimeRef.current = currentTime.getTime();
+
+  // Cache dayEnd in a ref so the animation tick sees the latest value
+  const dayEndRef = useRef<number>(dayEnd.getTime());
+  dayEndRef.current = dayEnd.getTime();
+
   // Animation loop for play mode
   useEffect(() => {
     if (!isPlaying) {
@@ -76,15 +84,15 @@ export function TimeSlider() {
 
       // playSpeed = minutes of simulated time per real second
       const simulatedMs = (deltaMs / 1000) * playSpeed * 60 * 1000;
-      const newTime = new Date(currentTime.getTime() + simulatedMs);
+      const newTimeMs = simulatedTimeRef.current + simulatedMs;
 
-      if (newTime >= dayEnd) {
+      if (newTimeMs >= dayEndRef.current) {
         setPlaying(false);
-        setTime(dayEnd);
+        setTime(new Date(dayEndRef.current));
         return;
       }
 
-      setTime(newTime);
+      setTime(new Date(newTimeMs));
       animationRef.current = requestAnimationFrame(tick);
     };
 
@@ -95,7 +103,7 @@ export function TimeSlider() {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isPlaying, playSpeed]);
+  }, [isPlaying, playSpeed, setTime, setPlaying]);
 
   // Live mode: update every 60 seconds
   useEffect(() => {

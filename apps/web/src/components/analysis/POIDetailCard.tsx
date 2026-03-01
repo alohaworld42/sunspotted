@@ -43,7 +43,7 @@ export function POIDetailCard({ poi, sunScore, onClose }: POIDetailCardProps) {
         </div>
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-gray-600 text-lg leading-none"
+          className="text-gray-400 hover:text-gray-600 text-lg leading-none cursor-pointer"
         >
           &times;
         </button>

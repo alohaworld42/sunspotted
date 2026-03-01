@@ -3,8 +3,8 @@ import type { POI, POICategory } from "../types/poi";
 import { fetchPOIsFromOverpass } from "../lib/poi/loader";
 import { useAnalysisStore } from "../store/analysisStore";
 
-/** Radius around selected point for POI search (~400m) */
-const POI_RADIUS_DEG = 0.004;
+/** Radius around selected point for POI search (~800m) */
+const POI_RADIUS_DEG = 0.008;
 
 /**
  * Hook that fetches cafés from Overpass API near the selected analysis point.

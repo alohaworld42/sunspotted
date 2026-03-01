@@ -33,7 +33,8 @@ export function projectBuildingShadow(
   // No shadow when sun is below horizon or directly overhead
   if (sunAltitude <= 0.01) return null;
 
-  const shadowLength = height / Math.tan(sunAltitude);
+  // Cap shadow length to 500m to avoid enormous polygons at very low sun angles
+  const shadowLength = Math.min(height / Math.tan(sunAltitude), 500);
 
   // suncalc azimuth: 0 = south, positive = west (clockwise from south)
   // Using bearing formula (dx=sin, dy=cos) with suncalc azimuth directly
@@ -128,7 +129,7 @@ export function calculateFullShadows(
   const cosAngle = Math.cos(angle);
 
   for (const building of buildings) {
-    const shadowLength = building.height / Math.tan(sunAltitude);
+    const shadowLength = Math.min(building.height / Math.tan(sunAltitude), 500);
     const dxDeg = metersToDegreesLng(shadowLength * sinAngle, centerLat);
     const dyDeg = metersToDegreesLat(shadowLength * cosAngle);
 
@@ -181,7 +182,7 @@ export function calculateSimpleShadows(
   const cosAngle = Math.cos(angle);
 
   for (const building of buildings) {
-    const shadowLength = building.height / Math.tan(sunAltitude);
+    const shadowLength = Math.min(building.height / Math.tan(sunAltitude), 500);
     const dxDeg = metersToDegreesLng(shadowLength * sinAngle, centerLat);
     const dyDeg = metersToDegreesLat(shadowLength * cosAngle);
 

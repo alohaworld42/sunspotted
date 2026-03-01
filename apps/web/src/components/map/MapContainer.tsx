@@ -81,6 +81,8 @@ export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: Ma
   const setBounds = useMapStore((s) => s.setBounds);
 
   const { analyzePoint } = usePointAnalysis();
+  const analyzePointRef = useRef(analyzePoint);
+  analyzePointRef.current = analyzePoint;
   const selectedPoint = useAnalysisStore((s) => s.selectedPoint);
   const analysisShadows = useAnalysisStore((s) => s.analysisShadows);
   const treeShadows = useAnalysisStore((s) => s.treeShadows);
@@ -236,9 +238,10 @@ export function MapContainer({ pois = [], onPoiSelect, satelliteOn = false }: Ma
     map.on("moveend", () => updateMapState(map));
 
     // Click = analyze that point (clear POI name since it's a direct map click)
+    // Use ref to always call the latest analyzePoint (avoids stale closure)
     map.on("click", (e) => {
       useAnalysisStore.getState().setSelectedPOIName(null);
-      analyzePoint([e.lngLat.lng, e.lngLat.lat]);
+      analyzePointRef.current([e.lngLat.lng, e.lngLat.lat]);
     });
 
     map.getCanvas().style.cursor = "crosshair";
